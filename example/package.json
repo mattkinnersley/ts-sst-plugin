@@ -1,0 +1,13 @@
+{
+  "name": "example-app",
+  "version": "0.0.1",
+  "description": "Example App",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "typescript": "^5.6.2"
+  },
+  "devDependencies": {
+    "ts-sst-plugin": "file:../"
+  }
+}

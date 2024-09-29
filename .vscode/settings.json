@@ -1,0 +1,3 @@
+{
+  "typescript.tsdk": "example/node_modules/typescript/lib"
+}
