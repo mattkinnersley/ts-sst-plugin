@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "description": "TypeScript SST Plugin",
   "main": "dist/index.js",
+  "homepage": "https://github.com/mattkinnersley/ts-sst-plugin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattkinnersley/ts-sst-plugin"
+  },
+  "author": "Matt Kinnersley <hello@mattkinnersley.com> (https://mattkinnersley.com/)",
   "scripts": {
     "release": "npm publish",
     "dev": "tsc --watch",
     "build": "tsc"
   },
-  "author": "",
   "license": "ISC",
   "dependencies": {
     "typescript": "^5.6.2"
