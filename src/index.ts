@@ -1,9 +1,13 @@
 import typescript, {
+  createSourceFile,
   Node,
   ScriptElementKind,
+  ScriptTarget,
+  SourceFile,
   SyntaxKind,
 } from "typescript/lib/typescript";
 import path from "path";
+import { readFileSync } from "fs";
 function init() {
   function create(info: typescript.server.PluginCreateInfo) {
     const logger = (string: string) => {
@@ -44,20 +48,40 @@ function init() {
       try {
         const sourceFile = getProgram().getSourceFile(fileName);
 
-        const node = sourceFile
+        const result = sourceFile
           ? findTargetNode(sourceFile, position, logger)
           : null;
 
-        if (!node) {
-          logger(`No handler string found`);
+        if (!result?.node) {
+          logger(`No target node found`);
           return original;
         } else {
-          const [start, end] = node.getText().split(".");
-          const definitionFilename = `${start.replace(`"`, "")}.ts`;
-          const handlerName = end.replace(`"`, "");
-          const definitionFilePath = `${projectDir}/${definitionFilename}`;
-          const definitionSourceFile =
-            getProgram().getSourceFile(definitionFilePath);
+          let definitionFilePath = null;
+          let definitionName = null;
+          let definitionSourceFile: SourceFile | undefined;
+          if (
+            result.key === "dynamoSubscription" ||
+            result.key === "functionHandler"
+          ) {
+            const [start, end] = result.node.getText().split(".");
+            const definitionFilename = `${start.replaceAll(`"`, "")}.ts`;
+            definitionName = end.replaceAll(`"`, "");
+            definitionFilePath = `${projectDir}/${definitionFilename}`;
+            definitionSourceFile =
+              getProgram().getSourceFile(definitionFilePath);
+          }
+          if (result.key === "packagePath") {
+            const definitionFilename = result.node
+              .getText()
+              .replaceAll(`"`, "");
+            definitionFilePath = `${projectDir}/${definitionFilename}/package.json`;
+            definitionName = "package.json";
+            definitionSourceFile = createSourceFile(
+              definitionFilePath,
+              readFileSync(definitionFilePath).toString(),
+              ScriptTarget.JSON
+            );
+          }
           if (!definitionSourceFile) {
             logger(`No source file found for ${definitionFilePath}`);
             return original;
@@ -65,8 +89,8 @@ function init() {
           logger(`Found source file for ${definitionFilePath}`);
           return {
             textSpan: {
-              start: node.getStart(),
-              length: node.getWidth(),
+              start: result.node.getStart(),
+              length: result.node.getWidth(),
             },
             definitions: [
               {
@@ -76,7 +100,7 @@ function init() {
                   length: definitionSourceFile.getWidth(),
                 },
                 kind: ScriptElementKind.moduleElement,
-                name: handlerName,
+                name: definitionName || definitionSourceFile.fileName,
                 containerName: `"${definitionFilePath}"`,
                 contextSpan: {
                   start: definitionSourceFile.getStart(),
@@ -169,6 +193,15 @@ const findTargetNode = (
           {
             fn: (node) =>
               node.kind === SyntaxKind.StringLiteral &&
+              node.parent.kind === SyntaxKind.PropertyAssignment &&
+              node.parent.getFirstToken()?.getText() === "path" &&
+              node.getStart() <= position &&
+              node.getEnd() >= position,
+            key: "packagePath",
+          },
+          {
+            fn: (node) =>
+              node.kind === SyntaxKind.StringLiteral &&
               node.parent.getChildAt(0).kind ===
                 SyntaxKind.PropertyAccessExpression &&
               node.parent.getChildAt(0).getFullText().includes(".subscribe") &&
@@ -181,7 +214,7 @@ const findTargetNode = (
       )
     : null;
 
-  return result?.node;
+  return result;
 };
 
 export = init;

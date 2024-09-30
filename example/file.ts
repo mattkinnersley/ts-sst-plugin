@@ -1,11 +1,13 @@
-import { Component, hello, x } from "./another-file";
+import { Dynamo, Function, hello, StaticSite, x } from "./another-file";
 
 const y = hello + x.hi;
 
-const db = new Component({
+const api = new Function({
   handler: "packages/functions/api.handler",
   another: "woo hooo",
 });
+
+const db = new Dynamo();
 
 db.subscribe("packages/functions/dynamo.handler", {
   filters: [
@@ -23,6 +25,11 @@ db.subscribe("packages/functions/dynamo.handler", {
       },
     },
   ],
+});
+
+const site = new StaticSite({
+  path: "packages/web",
+  another: "woo hooo",
 });
 
 console.log(y);

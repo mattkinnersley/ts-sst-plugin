@@ -3,7 +3,7 @@ export const x = {
   hi: "hi",
 };
 
-export class Component {
+export class Function {
   protected handler: string;
   protected another: string;
   constructor({ handler, another }: { handler: string; another: string }) {
@@ -15,5 +15,20 @@ export class Component {
   }
   public subscribe(handler: string, options: { filters: any[] }) {
     return handler;
+  }
+}
+
+export class Dynamo {
+  public subscribe(handler: string, options: { filters: any[] }) {
+    return handler;
+  }
+}
+
+export class StaticSite {
+  protected path: string;
+  protected another: string;
+  constructor({ path, another }: { path: string; another: string }) {
+    this.path = path;
+    this.another = another;
   }
 }

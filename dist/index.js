@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 const typescript_1 = require("typescript/lib/typescript");
 const path_1 = __importDefault(require("path"));
+const fs_1 = require("fs");
 function init() {
     function create(info) {
         const logger = (string) => {
@@ -33,19 +34,34 @@ function init() {
             const projectDir = path_1.default.dirname(project.getProjectName());
             try {
                 const sourceFile = getProgram().getSourceFile(fileName);
-                const node = sourceFile
+                const result = sourceFile
                     ? findTargetNode(sourceFile, position, logger)
                     : null;
-                if (!node) {
-                    logger(`No handler string found`);
+                if (!result?.node) {
+                    logger(`No target node found`);
                     return original;
                 }
                 else {
-                    const [start, end] = node.getText().split(".");
-                    const definitionFilename = `${start.replace(`"`, "")}.ts`;
-                    const handlerName = end.replace(`"`, "");
-                    const definitionFilePath = `${projectDir}/${definitionFilename}`;
-                    const definitionSourceFile = getProgram().getSourceFile(definitionFilePath);
+                    let definitionFilePath = null;
+                    let definitionName = null;
+                    let definitionSourceFile;
+                    if (result.key === "dynamoSubscription" ||
+                        result.key === "functionHandler") {
+                        const [start, end] = result.node.getText().split(".");
+                        const definitionFilename = `${start.replaceAll(`"`, "")}.ts`;
+                        definitionName = end.replaceAll(`"`, "");
+                        definitionFilePath = `${projectDir}/${definitionFilename}`;
+                        definitionSourceFile =
+                            getProgram().getSourceFile(definitionFilePath);
+                    }
+                    if (result.key === "packagePath") {
+                        const definitionFilename = result.node
+                            .getText()
+                            .replaceAll(`"`, "");
+                        definitionFilePath = `${projectDir}/${definitionFilename}/package.json`;
+                        definitionName = "package.json";
+                        definitionSourceFile = (0, typescript_1.createSourceFile)(definitionFilePath, (0, fs_1.readFileSync)(definitionFilePath).toString(), typescript_1.ScriptTarget.JSON);
+                    }
                     if (!definitionSourceFile) {
                         logger(`No source file found for ${definitionFilePath}`);
                         return original;
@@ -53,8 +69,8 @@ function init() {
                     logger(`Found source file for ${definitionFilePath}`);
                     return {
                         textSpan: {
-                            start: node.getStart(),
-                            length: node.getWidth(),
+                            start: result.node.getStart(),
+                            length: result.node.getWidth(),
                         },
                         definitions: [
                             {
@@ -64,7 +80,7 @@ function init() {
                                     length: definitionSourceFile.getWidth(),
                                 },
                                 kind: typescript_1.ScriptElementKind.moduleElement,
-                                name: handlerName,
+                                name: definitionName || definitionSourceFile.fileName,
                                 containerName: `"${definitionFilePath}"`,
                                 contextSpan: {
                                     start: definitionSourceFile.getStart(),
@@ -86,7 +102,6 @@ function init() {
     return { create };
 }
 const findNodeInTree = (node, conditions, logger) => {
-    var _a, _b;
     let key = null;
     for (let i = 0; key == null && i < conditions.length; i++) {
         const condition = conditions[i];
@@ -100,8 +115,8 @@ const findNodeInTree = (node, conditions, logger) => {
         for (let i = 0; i < children.length; i++) {
             logger(`child ${i} of kind ${typescript_1.SyntaxKind[children[i].kind]}: ${children[i].getFullText()}`);
         }
-        logger(`grandparents kind: ${typescript_1.SyntaxKind[(_a = node.parent) === null || _a === void 0 ? void 0 : _a.parent.kind]}`);
-        logger(`parents kind: ${typescript_1.SyntaxKind[(_b = node.parent) === null || _b === void 0 ? void 0 : _b.kind]}`);
+        logger(`grandparents kind: ${typescript_1.SyntaxKind[node.parent?.parent.kind]}`);
+        logger(`parents kind: ${typescript_1.SyntaxKind[node.parent?.kind]}`);
         const parentsChildren = node.parent.getChildren();
         for (let i = 0; i < parentsChildren.length; i++) {
             logger(`parent child ${i} of kind ${typescript_1.SyntaxKind[parentsChildren[i].kind]}: ${parentsChildren[i].getFullText()}`);
@@ -123,15 +138,20 @@ const findTargetNode = (sourceFile, position, logger) => {
     const result = sourceFile
         ? findNodeInTree(sourceFile, [
             {
-                fn: (node) => {
-                    var _a;
-                    return node.kind === typescript_1.SyntaxKind.StringLiteral &&
-                        node.parent.kind === typescript_1.SyntaxKind.PropertyAssignment &&
-                        ((_a = node.parent.getFirstToken()) === null || _a === void 0 ? void 0 : _a.getText()) === "handler" &&
-                        node.getStart() <= position &&
-                        node.getEnd() >= position;
-                },
+                fn: (node) => node.kind === typescript_1.SyntaxKind.StringLiteral &&
+                    node.parent.kind === typescript_1.SyntaxKind.PropertyAssignment &&
+                    node.parent.getFirstToken()?.getText() === "handler" &&
+                    node.getStart() <= position &&
+                    node.getEnd() >= position,
                 key: "functionHandler",
+            },
+            {
+                fn: (node) => node.kind === typescript_1.SyntaxKind.StringLiteral &&
+                    node.parent.kind === typescript_1.SyntaxKind.PropertyAssignment &&
+                    node.parent.getFirstToken()?.getText() === "path" &&
+                    node.getStart() <= position &&
+                    node.getEnd() >= position,
+                key: "packagePath",
             },
             {
                 fn: (node) => node.kind === typescript_1.SyntaxKind.StringLiteral &&
@@ -144,7 +164,7 @@ const findTargetNode = (sourceFile, position, logger) => {
             },
         ], logger)
         : null;
-    return result === null || result === void 0 ? void 0 : result.node;
+    return result;
 };
 module.exports = init;
 //# sourceMappingURL=index.js.map

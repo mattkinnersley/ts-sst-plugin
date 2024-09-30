@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es2017" /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */,
+    "target": "ESNext" /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */,
     "module": "NodeNext" /* Specify what module code is generated. */,
     "sourceMap": true /* Create source map files for emitted JavaScript files. */,
     "outDir": "dist",
