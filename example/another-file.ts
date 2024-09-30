@@ -13,4 +13,7 @@ export class Component {
   public getHandler() {
     return this.handler;
   }
+  public subscribe(handler: string, options: { filters: any[] }) {
+    return handler;
+  }
 }

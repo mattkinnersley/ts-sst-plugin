@@ -44,20 +44,9 @@ function init() {
       try {
         const sourceFile = getProgram().getSourceFile(fileName);
 
-        const handlerPropertyNode = sourceFile
-          ? findNodeInTree(
-              sourceFile,
-              (node) =>
-                node.kind === SyntaxKind.PropertyAssignment &&
-                node.getFirstToken()?.getText() === "handler" &&
-                node.getStart() <= position &&
-                node.getEnd() >= position,
-              logger
-            )
+        const node = sourceFile
+          ? findTargetNode(sourceFile, position, logger)
           : null;
-        const node = handlerPropertyNode
-          ?.getChildren()
-          .find((node) => node.kind === SyntaxKind.StringLiteral);
 
         if (!node) {
           logger(`No handler string found`);
@@ -112,18 +101,87 @@ function init() {
 
 const findNodeInTree = (
   node: Node,
-  condition: (node: Node) => boolean,
+  conditions: { fn: (node: Node) => boolean; key: string }[],
   logger: (string: string) => void
 ) => {
-  if (condition(node)) {
-    return node;
+  let key = null;
+  for (let i = 0; key == null && i < conditions.length; i++) {
+    const condition = conditions[i];
+    if (condition.fn(node)) {
+      key = condition.key;
+    }
+  }
+  if (key) {
+    const children = node.getChildren();
+    logger(`found ${key} with child count: ${children.length}`);
+    for (let i = 0; i < children.length; i++) {
+      logger(
+        `child ${i} of kind ${SyntaxKind[children[i].kind]}: ${children[
+          i
+        ].getFullText()}`
+      );
+    }
+
+    logger(`grandparents kind: ${SyntaxKind[node.parent?.parent.kind]}`);
+    logger(`parents kind: ${SyntaxKind[node.parent?.kind]}`);
+    const parentsChildren = node.parent.getChildren();
+    for (let i = 0; i < parentsChildren.length; i++) {
+      logger(
+        `parent child ${i} of kind ${
+          SyntaxKind[parentsChildren[i].kind]
+        }: ${parentsChildren[i].getFullText()}`
+      );
+    }
+
+    logger("parent child 0: " + node.parent.getChildAt(0).getFullText());
+
+    logger("this kind: " + SyntaxKind[node.kind]);
+    logger("this text: " + node.getText());
+
+    return { node, key };
   } else {
-    let result: Node | undefined;
+    let result: { node: Node; key: string } | undefined;
     for (let i = 0; result == null && i < node.getChildCount(); i++) {
-      result = findNodeInTree(node.getChildAt(i), condition, logger);
+      result = findNodeInTree(node.getChildAt(i), conditions, logger);
     }
     return result;
   }
+};
+
+const findTargetNode = (
+  sourceFile: Node,
+  position: number,
+  logger: (string: string) => void
+) => {
+  const result = sourceFile
+    ? findNodeInTree(
+        sourceFile,
+        [
+          {
+            fn: (node) =>
+              node.kind === SyntaxKind.StringLiteral &&
+              node.parent.kind === SyntaxKind.PropertyAssignment &&
+              node.parent.getFirstToken()?.getText() === "handler" &&
+              node.getStart() <= position &&
+              node.getEnd() >= position,
+            key: "functionHandler",
+          },
+          {
+            fn: (node) =>
+              node.kind === SyntaxKind.StringLiteral &&
+              node.parent.getChildAt(0).kind ===
+                SyntaxKind.PropertyAccessExpression &&
+              node.parent.getChildAt(0).getFullText().includes(".subscribe") &&
+              node.getStart() <= position &&
+              node.getEnd() >= position,
+            key: "dynamoSubscription",
+          },
+        ],
+        logger
+      )
+    : null;
+
+  return result?.node;
 };
 
 export = init;
