@@ -5,11 +5,14 @@
 
 # What is this?
 
-This is a TypeScript plugin for [SST](https://sst.dev/) that enables ['Go to Definition'](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition) for function handlers in your config.
+This is a TypeScript plugin for [SST](https://sst.dev/) that enables ['Go to Definition'](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_definition) for your SST config.
 
 # How does it work?
 
-It works by finding any instance of `handler: 'path/to/function.handler'` in your files and finds the definition of the function from that path in your codebase.
+It works by finding any instance of certain path targets in your config files and finds the definition from that path in your codebase. The current targets are:
+- `handler: 'path/to/function.handler'`
+- `.subscribe('path/to/dynamodb/subscriber')`
+- `path: 'path/to/web/app/root'` (jumps to package.json)
 
 # How do I use it?
 
