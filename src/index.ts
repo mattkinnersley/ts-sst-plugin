@@ -1,13 +1,19 @@
 import typescript, {
   createSourceFile,
+  Diagnostic,
+  DiagnosticCategory,
   Node,
+  Program,
   ScriptElementKind,
   ScriptTarget,
   SourceFile,
   SyntaxKind,
 } from "typescript/lib/typescript";
 import path from "path";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+
+type ResultKey = "functionHandler" | "packagePath" | "dynamoSubscription";
+
 function init() {
   function create(info: typescript.server.PluginCreateInfo) {
     const logger = (string: string) => {
@@ -29,9 +35,58 @@ function init() {
     const getProgram = () => {
       const program = info.languageService.getProgram();
       if (!program) {
-        throw new Error();
+        throw new Error("Could not get program");
       }
       return program;
+    };
+
+    proxy.getSemanticDiagnostics = (fileName) => {
+      logger("getSemanticDiagnostics");
+      const original = info.languageService.getSemanticDiagnostics(fileName);
+      const { project } = info;
+
+      const projectDir = path.dirname(project.getProjectName());
+      try {
+        const sourceFile = getProgram().getSourceFile(fileName);
+        if (!sourceFile) {
+          return original;
+        }
+
+        const results = findTargetNodes(sourceFile);
+        if (!results?.length) {
+          return original;
+        }
+
+        let customDiagnostics: Diagnostic[] = [];
+        results.forEach((result) => {
+          logger(`Found ${result.key}: ${result.node.getText()}`);
+          const { definitionSourceFile, definitionFilePath } =
+            getDefinitionFromResult(result, projectDir, getProgram);
+          if (!definitionSourceFile) {
+            const category =
+              Number(info.config.rules?.["check-paths"]) > -1 &&
+              Number(info.config.rules?.["check-paths"]) < 4
+                ? Number(info.config.rules?.["check-paths"])
+                : DiagnosticCategory.Error;
+
+            customDiagnostics.push({
+              start: result.node.getStart(),
+              code: 557,
+              category: category,
+              messageText: `Cannot find file ${definitionFilePath}`,
+              source: "ts-sst-plugin",
+              file: sourceFile,
+              length: result.node.getWidth(),
+            });
+          }
+        });
+
+        const diagnostics = [...original, ...customDiagnostics];
+        return diagnostics;
+      } catch (error: any) {
+        logger(error.message ? error.message : "unknown error");
+        return original;
+      }
     };
 
     // Remove specified entries from completion list
@@ -48,45 +103,18 @@ function init() {
       try {
         const sourceFile = getProgram().getSourceFile(fileName);
 
-        const result = sourceFile
-          ? findTargetNode(sourceFile, position, logger)
-          : null;
+        const result = sourceFile ? findTargetNode(sourceFile, position) : null;
 
         if (!result?.node) {
           logger(`No target node found`);
           return original;
         } else {
-          let definitionFilePath = null;
-          let definitionName = null;
-          let definitionSourceFile: SourceFile | undefined;
-          if (
-            result.key === "dynamoSubscription" ||
-            result.key === "functionHandler"
-          ) {
-            const [start, end] = result.node.getText().split(".");
-            const definitionFilename = `${start.replaceAll(`"`, "")}.ts`;
-            definitionName = end.replaceAll(`"`, "");
-            definitionFilePath = `${projectDir}/${definitionFilename}`;
-            definitionSourceFile =
-              getProgram().getSourceFile(definitionFilePath);
-          }
-          if (result.key === "packagePath") {
-            const definitionFilename = result.node
-              .getText()
-              .replaceAll(`"`, "");
-            definitionFilePath = `${projectDir}/${definitionFilename}/package.json`;
-            definitionName = "package.json";
-            definitionSourceFile = createSourceFile(
-              definitionFilePath,
-              readFileSync(definitionFilePath).toString(),
-              ScriptTarget.JSON
-            );
-          }
+          const { definitionSourceFile, definitionName, definitionFilePath } =
+            getDefinitionFromResult(result, projectDir, getProgram);
           if (!definitionSourceFile) {
             logger(`No source file found for ${definitionFilePath}`);
             return original;
           }
-          logger(`Found source file for ${definitionFilePath}`);
           return {
             textSpan: {
               start: result.node.getStart(),
@@ -125,8 +153,7 @@ function init() {
 
 const findNodeInTree = (
   node: Node,
-  conditions: { fn: (node: Node) => boolean; key: string }[],
-  logger: (string: string) => void
+  conditions: { fn: (node: Node) => boolean; key: ResultKey }[]
 ) => {
   let key = null;
   for (let i = 0; key == null && i < conditions.length; i++) {
@@ -136,67 +163,92 @@ const findNodeInTree = (
     }
   }
   if (key) {
-    const children = node.getChildren();
-    logger(`found ${key} with child count: ${children.length}`);
-    for (let i = 0; i < children.length; i++) {
-      logger(
-        `child ${i} of kind ${SyntaxKind[children[i].kind]}: ${children[
-          i
-        ].getFullText()}`
-      );
-    }
-
-    logger(`grandparents kind: ${SyntaxKind[node.parent?.parent.kind]}`);
-    logger(`parents kind: ${SyntaxKind[node.parent?.kind]}`);
-    const parentsChildren = node.parent.getChildren();
-    for (let i = 0; i < parentsChildren.length; i++) {
-      logger(
-        `parent child ${i} of kind ${
-          SyntaxKind[parentsChildren[i].kind]
-        }: ${parentsChildren[i].getFullText()}`
-      );
-    }
-
-    logger("parent child 0: " + node.parent.getChildAt(0).getFullText());
-
-    logger("this kind: " + SyntaxKind[node.kind]);
-    logger("this text: " + node.getText());
-
     return { node, key };
   } else {
-    let result: { node: Node; key: string } | undefined;
+    let result: { node: Node; key: ResultKey } | undefined;
     for (let i = 0; result == null && i < node.getChildCount(); i++) {
-      result = findNodeInTree(node.getChildAt(i), conditions, logger);
+      result = findNodeInTree(node.getChildAt(i), conditions);
     }
     return result;
   }
 };
 
-const findTargetNode = (
-  sourceFile: Node,
-  position: number,
-  logger: (string: string) => void
-) => {
+const findTargetNode = (sourceFile: Node, position: number) => {
   const result = sourceFile
-    ? findNodeInTree(
+    ? findNodeInTree(sourceFile, [
+        {
+          fn: (node) =>
+            node.kind === SyntaxKind.StringLiteral &&
+            node.parent.kind === SyntaxKind.PropertyAssignment &&
+            node.parent.getFirstToken()?.getText() === "handler" &&
+            node.getStart() <= position &&
+            node.getEnd() >= position,
+          key: "functionHandler",
+        },
+        {
+          fn: (node) =>
+            node.kind === SyntaxKind.StringLiteral &&
+            node.parent.kind === SyntaxKind.PropertyAssignment &&
+            node.parent.getFirstToken()?.getText() === "path" &&
+            node.getStart() <= position &&
+            node.getEnd() >= position,
+          key: "packagePath",
+        },
+        {
+          fn: (node) =>
+            node.kind === SyntaxKind.StringLiteral &&
+            node.parent.getChildAt(0).kind ===
+              SyntaxKind.PropertyAccessExpression &&
+            node.parent.getChildAt(0).getFullText().includes(".subscribe") &&
+            node.getStart() <= position &&
+            node.getEnd() >= position,
+          key: "dynamoSubscription",
+        },
+      ])
+    : null;
+
+  return result;
+};
+
+const findNodesInTree = (
+  node: Node,
+  conditions: { fn: (node: Node) => boolean; key: ResultKey }[],
+  results: { node: Node; key: ResultKey }[]
+) => {
+  let key = null;
+  for (let i = 0; key == null && i < conditions.length; i++) {
+    const condition = conditions[i];
+    if (condition.fn(node)) {
+      key = condition.key;
+    }
+  }
+  if (key) {
+    results.push({ node, key });
+  } else {
+    for (let i = 0; i < node.getChildCount(); i++) {
+      findNodesInTree(node.getChildAt(i), conditions, results);
+    }
+    return results;
+  }
+};
+
+const findTargetNodes = (sourceFile: Node) => {
+  const result = sourceFile
+    ? findNodesInTree(
         sourceFile,
         [
           {
             fn: (node) =>
               node.kind === SyntaxKind.StringLiteral &&
               node.parent.kind === SyntaxKind.PropertyAssignment &&
-              node.parent.getFirstToken()?.getText() === "handler" &&
-              node.getStart() <= position &&
-              node.getEnd() >= position,
+              node.parent.getFirstToken()?.getText() === "handler",
             key: "functionHandler",
           },
           {
             fn: (node) =>
               node.kind === SyntaxKind.StringLiteral &&
               node.parent.kind === SyntaxKind.PropertyAssignment &&
-              node.parent.getFirstToken()?.getText() === "path" &&
-              node.getStart() <= position &&
-              node.getEnd() >= position,
+              node.parent.getFirstToken()?.getText() === "path",
             key: "packagePath",
           },
           {
@@ -204,17 +256,45 @@ const findTargetNode = (
               node.kind === SyntaxKind.StringLiteral &&
               node.parent.getChildAt(0).kind ===
                 SyntaxKind.PropertyAccessExpression &&
-              node.parent.getChildAt(0).getFullText().includes(".subscribe") &&
-              node.getStart() <= position &&
-              node.getEnd() >= position,
+              node.parent.getChildAt(0).getFullText().includes(".subscribe"),
             key: "dynamoSubscription",
           },
         ],
-        logger
+        []
       )
     : null;
 
   return result;
+};
+
+const getDefinitionFromResult = (
+  result: { node: Node; key: ResultKey },
+  projectDir: string,
+  getProgram: () => Program
+) => {
+  let definitionFilePath = null;
+  let definitionName = null;
+  let definitionSourceFile: SourceFile | undefined;
+  if (result.key === "dynamoSubscription" || result.key === "functionHandler") {
+    const [start, end] = result.node.getText().split(".");
+    const definitionFilename = `${start.replaceAll(`"`, "")}.ts`;
+    definitionName = end.replaceAll(`"`, "");
+    definitionFilePath = `${projectDir}/${definitionFilename}`;
+    definitionSourceFile = getProgram().getSourceFile(definitionFilePath);
+  }
+  if (result.key === "packagePath") {
+    const definitionFilename = result.node.getText().replaceAll(`"`, "");
+    definitionFilePath = `${projectDir}/${definitionFilename}/package.json`;
+    definitionName = "package.json";
+    if (existsSync(definitionFilePath)) {
+      definitionSourceFile = createSourceFile(
+        definitionFilePath,
+        readFileSync(definitionFilePath).toString(),
+        ScriptTarget.JSON
+      );
+    }
+  }
+  return { definitionSourceFile, definitionName, definitionFilePath };
 };
 
 export = init;
