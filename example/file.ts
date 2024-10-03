@@ -3,7 +3,7 @@ import { Dynamo, Function, hello, StaticSite, x } from "./another-file";
 const y = hello + x.hi;
 
 const api = new Function({
-  handler: "packages/functions/api.handler",
+  handler: "packages/functions/something.with.dots/api.handler",
   another: "woo hooo",
 });
 
@@ -28,7 +28,7 @@ db.subscribe("packages/functions/dynamo.handler", {
 });
 
 const site = new StaticSite({
-  path: "packages/web",
+  path: "packages/web.with.dots",
   another: "woo hooo",
 });
 

@@ -40,6 +40,72 @@ function init() {
       return program;
     };
 
+    proxy.getCompletionsAtPosition = (fileName, position, options) => {
+      logger("getCompletionsAtPosition");
+      const original = info.languageService.getCompletionsAtPosition(
+        fileName,
+        position,
+        options
+      );
+      // logger(`Original completions length: ${original?.entries.length}`);
+      // logger(
+      //   `Original ${
+      //     original?.isGlobalCompletion ? "global" : "local"
+      //   } completion`
+      // );
+      // logger(`Original ${original?.isIncomplete}`);
+      // logger(
+      //   `Original ${
+      //     original?.isMemberCompletion ? "member" : "non-member"
+      //   } completion`
+      // );
+      // logger(
+      //   `Original ${
+      //     original?.isNewIdentifierLocation
+      //       ? "new identifier"
+      //       : "not new identifier"
+      //   } location`
+      // );
+      // logger(`Original completions: ${original?.entries.map((e) => e.name)}`);
+      // logger(`Original[0] name: ${original?.entries[0]?.name}`);
+      // logger(`Original[0] kind: ${original?.entries[0]?.kind}`);
+      // logger(
+      //   `Original[0] kindModifiers: ${original?.entries[0]?.kindModifiers}`
+      // );
+      // logger(`Original[0] sortText: ${original?.entries[0]?.sortText}`);
+      // logger(`Original[0] source: ${original?.entries[0]?.source}`);
+      // logger(`Original[0] hasAction: ${original?.entries[0]?.hasAction}`);
+      // logger(`Original[0] insertText: ${original?.entries[0]?.insertText}`);
+      // logger(
+      //   `Original[0] replacementSpan: ${original?.entries[0]?.replacementSpan}`
+      // );
+      // logger(
+      //   `Original[0] isRecommended: ${original?.entries[0]?.isRecommended}`
+      // );
+      // logger(
+      //   `Original[0] isFromUncheckedFile: ${original?.entries[0]?.isFromUncheckedFile}`
+      // );
+      // logger(
+      //   `Original[0] isPackageJsonImport: ${original?.entries[0]?.isPackageJsonImport}`
+      // );
+      // logger(
+      //   `Original[0] commitCharacters: ${original?.entries[0]?.commitCharacters}`
+      // );
+      // logger(`Original[0] data: ${original?.entries[0]?.data}`);
+      // logger(
+      //   `Original[0] sourceDisplay: ${original?.entries[0]?.sourceDisplay}`
+      // );
+      // logger(`Original[0] isSnippet: ${original?.entries[0]?.isSnippet}`);
+      // logger(`Original[0] filterText: ${original?.entries[0]?.filterText}`);
+      // logger(
+      //   `Original[0] labelDetails description: ${original?.entries[0]?.labelDetails?.description}`
+      // );
+      // logger(
+      //   `Original[0] labelDetails detail: ${original?.entries[0]?.labelDetails?.detail}`
+      // );
+      return original;
+    };
+
     proxy.getSemanticDiagnostics = (fileName) => {
       logger("getSemanticDiagnostics");
       const original = info.languageService.getSemanticDiagnostics(fileName);
@@ -275,16 +341,20 @@ const getDefinitionFromResult = (
   let definitionFilePath = null;
   let definitionName = null;
   let definitionSourceFile: SourceFile | undefined;
+  const path = result.node.getText().replaceAll(`"`, "");
   if (result.key === "dynamoSubscription" || result.key === "functionHandler") {
-    const [start, end] = result.node.getText().split(".");
-    const definitionFilename = `${start.replaceAll(`"`, "")}.ts`;
-    definitionName = end.replaceAll(`"`, "");
-    definitionFilePath = `${projectDir}/${definitionFilename}`;
+    const dotIndex = path.lastIndexOf(".");
+    const definitionFilename = path.substring(0, dotIndex);
+    definitionName = path.substring(dotIndex + 1);
+    definitionFilePath = `${projectDir}/${definitionFilename}.ts`;
     definitionSourceFile = getProgram().getSourceFile(definitionFilePath);
+    if (!definitionSourceFile) {
+      definitionFilePath = `${projectDir}/${definitionFilename}.js`;
+      definitionSourceFile = getProgram().getSourceFile(definitionFilePath);
+    }
   }
   if (result.key === "packagePath") {
-    const definitionFilename = result.node.getText().replaceAll(`"`, "");
-    definitionFilePath = `${projectDir}/${definitionFilename}/package.json`;
+    definitionFilePath = `${projectDir}/${path}/package.json`;
     definitionName = "package.json";
     if (existsSync(definitionFilePath)) {
       definitionSourceFile = createSourceFile(
